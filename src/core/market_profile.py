@@ -44,9 +44,9 @@ US_PROFILE = MarketProfile(
     region="us",
     mood_index_code="SPX",
     news_queries=[
-        "美股 大盘",
-        "US stock market",
+        "US stock market today",
         "S&P 500 NASDAQ",
+        "semiconductor stocks SOX index",
     ],
     prompt_index_hint="分析标普500、纳斯达克、道指等各指数走势特点",
     has_market_stats=False,

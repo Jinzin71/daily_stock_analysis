@@ -195,6 +195,18 @@ class TelegramSender:
                         return True
                 logger.error(f"Telegram 请求失败: HTTP {response.status_code}")
                 logger.error(f"响应内容: {response.text}")
+                if response.status_code == 404:
+                    logger.error(
+                        "Telegram HTTP 404 表示 Bot Token 无效（格式错误、已被 /revoke 或复制不完整）。"
+                        "请在 @BotFather 中执行 /token 重新获取，并更新 GitHub Secret TELEGRAM_BOT_TOKEN "
+                        "（只填 '123456789:AAH...' 本体，不要带 'bot' 前缀、引号或空格）。"
+                    )
+                elif response.status_code == 400 and "chat not found" in response.text.lower():
+                    logger.error(
+                        "Telegram 'chat not found'：TELEGRAM_CHAT_ID 错误，或尚未先给 Bot 发送 /start。"
+                    )
+                elif response.status_code == 403:
+                    logger.error("Telegram 403：Bot 被用户屏蔽或未加入目标群组/频道。")
                 return False
 
         return False

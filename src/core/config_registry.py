@@ -1264,6 +1264,20 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "validation": {},
         "display_order": 53,
     },
+    "GOOGLE_NEWS_RSS_ENABLED": {
+        "title": "Google News RSS Fallback",
+        "description": "Keyless Google News RSS news fallback, used after all key-based search providers. Headlines/source/time only. Default: false.",
+        "category": "data_source",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "false",
+        "options": [],
+        "validation": {},
+        "display_order": 53,
+    },
     "ENABLE_REALTIME_QUOTE": {
         "title": "Enable Realtime Quote",
         "description": "Enable realtime market quotes. Disable to only use historical close prices.",
@@ -4892,6 +4906,15 @@ _FIELD_HELP_METADATA: Dict[str, Dict[str, Any]] = {
         ],
         "docs": _DOC_FULL_GUIDE_SEARCH,
         "warning_codes": ["public_instance_stability"],
+    },
+    "GOOGLE_NEWS_RSS_ENABLED": {
+        "help_key": "settings.data_source.search_api_keys",
+        "examples": [
+            "GOOGLE_NEWS_RSS_ENABLED=false",
+            "GOOGLE_NEWS_RSS_ENABLED=true",
+        ],
+        "docs": _DOC_FULL_GUIDE_SEARCH,
+        "warning_codes": [],
     },
     "BIAS_THRESHOLD": {
         "help_key": "settings.data_source.BIAS_THRESHOLD",

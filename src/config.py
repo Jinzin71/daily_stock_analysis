@@ -232,6 +232,35 @@ AGENT_CONTEXT_COMPRESSION_PROFILES: Dict[str, AgentContextCompressionPreset] = {
 }
 
 
+def _strip_wrapping_quotes(value: Optional[str]) -> Optional[str]:
+    """Trim whitespace and one pair of wrapping quotes from a secret value."""
+    if value is None:
+        return None
+    text = value.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        text = text[1:-1].strip()
+    return text or None
+
+
+def normalize_telegram_bot_token(value: Optional[str]) -> Optional[str]:
+    """Normalize TELEGRAM_BOT_TOKEN pasted in common wrong shapes.
+
+    Telegram answers HTTP 404 "Not Found" for any malformed token, so tolerate:
+    surrounding whitespace / newlines / quotes, a leading ``bot`` prefix and a
+    full ``https://api.telegram.org/bot<token>/...`` URL.
+    """
+    text = _strip_wrapping_quotes(value)
+    if not text:
+        return None
+    url_match = re.search(r"api\.telegram\.org/bot([^/\s?#]+)", text)
+    if url_match:
+        text = url_match.group(1)
+    text = re.sub(r"\s+", "", text)
+    if text[:3].lower() == "bot" and ":" in text and text[3:4].isdigit():
+        text = text[3:]
+    return text or None
+
+
 def parse_env_bool(value: Optional[str], default: bool = False) -> bool:
     """Parse common truthy/falsey environment-style values."""
     if value is None:
@@ -1096,6 +1125,7 @@ class Config:
     searxng_base_urls: List[str] = field(default_factory=list)  # SearXNG instance URLs (self-hosted, no quota)
     searxng_public_instances_enabled: bool = False  # Opt in to public discovery when base URLs are absent
     searxng_timeout_seconds: int = 10  # 自建 SearXNG 单次搜索超时（秒）
+    google_news_rss_enabled: bool = False  # Google News RSS 无 Key 新闻兜底
 
     # === Social Sentiment (US stocks only, api.adanos.org) ===
     social_sentiment_api_key: Optional[str] = None
@@ -2014,6 +2044,7 @@ class Config:
             serpapi_keys=serpapi_keys,
             searxng_base_urls=searxng_base_urls,
             searxng_public_instances_enabled=searxng_public_instances_enabled,
+            google_news_rss_enabled=parse_env_bool(os.getenv('GOOGLE_NEWS_RSS_ENABLED'), default=False),
             searxng_timeout_seconds=parse_env_int(
                 os.getenv('SEARXNG_TIMEOUT_SECONDS'), 10, field_name='SEARXNG_TIMEOUT_SECONDS', minimum=1
             ),
@@ -2167,9 +2198,9 @@ class Config:
             feishu_chat_id=os.getenv('FEISHU_CHAT_ID'),
             feishu_receive_id_type=os.getenv('FEISHU_RECEIVE_ID_TYPE', 'chat_id'),
             feishu_domain=os.getenv('FEISHU_DOMAIN', 'feishu'),
-            telegram_bot_token=os.getenv('TELEGRAM_BOT_TOKEN'),
-            telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID'),
-            telegram_message_thread_id=os.getenv('TELEGRAM_MESSAGE_THREAD_ID'),
+            telegram_bot_token=normalize_telegram_bot_token(os.getenv('TELEGRAM_BOT_TOKEN')),
+            telegram_chat_id=_strip_wrapping_quotes(os.getenv('TELEGRAM_CHAT_ID')),
+            telegram_message_thread_id=_strip_wrapping_quotes(os.getenv('TELEGRAM_MESSAGE_THREAD_ID')),
             email_sender=os.getenv('EMAIL_SENDER'),
             email_sender_name=os.getenv('EMAIL_SENDER_NAME', 'daily_stock_analysis股票分析助手'),
             email_password=os.getenv('EMAIL_PASSWORD'),
@@ -3188,6 +3219,7 @@ class Config:
             or self.brave_api_keys
             or self.serpapi_keys
             or self.has_searxng_enabled()
+            or self.google_news_rss_enabled
         )
 
     def is_agent_available(self) -> bool:
@@ -3613,7 +3645,7 @@ class Config:
         if not self.has_search_capability_enabled():
             issues.append(ConfigIssue(
                 severity="info",
-                message="未配置搜索引擎能力 (Bocha/MiniMax/Tavily/Brave/SerpAPI/SearXNG)，新闻搜索功能将不可用",
+                message="未配置搜索引擎能力 (Bocha/MiniMax/Tavily/Brave/SerpAPI/SearXNG/GOOGLE_NEWS_RSS_ENABLED)，新闻搜索功能将不可用",
                 field="BOCHA_API_KEYS",
             ))
 
@@ -3660,6 +3692,15 @@ class Config:
                 severity="error",
                 message="Telegram 通知配置不完整：TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 必须同时配置。",
                 field="TELEGRAM_CHAT_ID" if has_telegram_token else "TELEGRAM_BOT_TOKEN",
+            ))
+        if has_telegram_token and not re.fullmatch(r"\d+:[A-Za-z0-9_-]{20,}", self.telegram_bot_token.strip()):
+            issues.append(ConfigIssue(
+                severity="warning",
+                message=(
+                    "TELEGRAM_BOT_TOKEN 格式异常（应为 '<数字>:<字母数字串>'，如 123456789:AAH...），"
+                    "Telegram 会返回 HTTP 404。请从 @BotFather 重新复制完整 Token。"
+                ),
+                field="TELEGRAM_BOT_TOKEN",
             ))
 
         has_email_sender = bool((self.email_sender or "").strip())

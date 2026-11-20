@@ -837,12 +837,12 @@ def _save_reused_market_review_report(
     body = str(market_report or "").strip()
     if not body:
         return
-    title = (
-        "# 🎯 Market Review"
-        if str(getattr(config, "report_language", "zh")).strip().lower() == "en"
-        else "# 🎯 大盘复盘"
-    )
-    if not any(body.startswith(item) for item in ("# 🎯 大盘复盘", "# 🎯 Market Review")):
+    report_language = str(getattr(config, "report_language", "zh")).strip().lower()
+    title = {
+        "en": "# 🎯 Market Review",
+        "ko": "# 🎯 시장 리뷰",
+    }.get(report_language, "# 🎯 大盘复盘")
+    if not any(body.startswith(item) for item in ("# 🎯 大盘复盘", "# 🎯 Market Review", "# 🎯 시장 리뷰")):
         body = f"{title}\n\n{body}"
     try:
         date_str = datetime.now().strftime('%Y%m%d')

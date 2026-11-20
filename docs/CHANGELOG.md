@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 新增 `GOOGLE_NEWS_RSS_ENABLED` 无 Key 的 Google News RSS 新闻兜底搜索，排在所有 Key 型搜索引擎之后。
+- [修复] `TELEGRAM_BOT_TOKEN` 自动去除空白/引号/`bot` 前缀/完整 URL，并在 HTTP 404 时给出 Token 无效的明确提示；每日工作流新增 getMe 预检。
+- [改进] 美股大盘新闻检索改用英文查询，并为 SOXL/SOXX 增加名称映射。
+- [修复] `REPORT_LANGUAGE=ko` 时决策仪表盘因数据源显示名缺少 ko 键抛出 `KeyError: 'ko'`，改为韩文/英文回退；YFinance 名称在 shortName 被截断时改用 longName。
+- [修复] `REPORT_LANGUAGE=ko` 时行情快照成交量、财务摘要金额与每股分红不再输出 亿股/美元 等中文单位，改用 B/M + 货币代码；大盘复盘文件标题支持韩文。
+- [chore] Fork 工作流默认：美股收盘后运行、`MARKET_REVIEW_REGION=us`、`REPORT_LANGUAGE=ko`、默认自选 SOXL。
+
 - [修复] 每日 Actions 未设置实时行情顺序时保留空值，使仅配置 TickPlus Key 的任务正确启用自动首选及批量实时预取；保留显式顺序和无 Key 免费源回退。
 
 - [修复] TickPlus 正确区分裸 000001 等股票与显式同码指数；补齐行情指标、按接口冷却与分组批量缓存，ETF 轮动使用独立前复权实例，并统一首选推荐入口。
