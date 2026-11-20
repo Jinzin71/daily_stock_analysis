@@ -365,7 +365,7 @@ jobs:
           SEARXNG_BASE_URLS: ${{ vars.SEARXNG_BASE_URLS || secrets.SEARXNG_BASE_URLS }}
           SEARXNG_PUBLIC_INSTANCES_ENABLED: ${{ vars.SEARXNG_PUBLIC_INSTANCES_ENABLED || secrets.SEARXNG_PUBLIC_INSTANCES_ENABLED }}
           SEARXNG_TIMEOUT_SECONDS: ${{ vars.SEARXNG_TIMEOUT_SECONDS || secrets.SEARXNG_TIMEOUT_SECONDS }}
-          # Google News RSS 无 Key 新闻兜底（默认开启；配置 Tavily 等 Key 后其优先）
+          # Google News RSS 无 Key 新闻兜底（本 fork 工作流取值 true；配置 Tavily 等 Key 后其优先）
           GOOGLE_NEWS_RSS_ENABLED: ${{ vars.GOOGLE_NEWS_RSS_ENABLED || 'true' }}
           MX_APIKEY: ${{ secrets.MX_APIKEY }}
           MX_PRIORITY: ${{ vars.MX_PRIORITY || secrets.MX_PRIORITY }}
