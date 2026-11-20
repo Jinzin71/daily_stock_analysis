@@ -90,3 +90,15 @@ def test_ko_dashboard_report_with_fallback_source_does_not_crash():
     assert "SOXL" in out
     assert "대체 소스" in out
     assert "降级兜底" not in out
+
+
+def test_ko_currency_and_volume_formatting_has_no_chinese_units():
+    from src.notification import NotificationService
+    from src.analyzer import GeminiAnalyzer
+
+    assert NotificationService._format_per_share(0.093, "USD", "ko") == "0.0930 USD"
+    assert NotificationService._format_amount_cn(1.5e9, "USD", "ko") == "1.50B USD"
+    # zh path unchanged
+    assert NotificationService._format_per_share(0.093, "USD") == "0.0930 美元"
+    vol = GeminiAnalyzer._format_volume(object.__new__(GeminiAnalyzer), 1.24e8, "ko")
+    assert "亿" not in vol and "shares" in vol
