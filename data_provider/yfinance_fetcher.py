@@ -887,7 +887,14 @@ class YfinanceFetcher(BaseFetcher):
             except Exception:
                 ticker_info = {}
             try:
-                info_name = ticker_info.get('shortName', '') or ticker_info.get('longName', '') or ''
+                short_name = ticker_info.get('shortName', '') or ''
+                long_name = ticker_info.get('longName', '') or ''
+                # Yahoo truncates shortName (~32 chars, e.g. "Direxion Daily Semiconductor Bu");
+                # use longName when it is the untruncated form of shortName.
+                if short_name and long_name and len(long_name) > len(short_name) and long_name.startswith(short_name):
+                    info_name = long_name
+                else:
+                    info_name = short_name or long_name
                 name = info_name if is_meaningful_stock_name(info_name, symbol) else STOCK_NAME_MAP.get(symbol, '')
             except Exception:
                 name = STOCK_NAME_MAP.get(symbol, '')

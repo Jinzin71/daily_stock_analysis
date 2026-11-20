@@ -65,3 +65,28 @@ def test_search_service_registers_rss_only_when_enabled():
     service = SearchService(google_news_rss_enabled=True)
     assert service.is_available
     assert any(isinstance(p, GoogleNewsRssSearchProvider) for p in service._providers)
+
+
+def test_ko_dashboard_report_with_fallback_source_does_not_crash():
+    from unittest import mock
+    from src.analyzer import AnalysisResult
+    from src.notification import NotificationService
+    from tests.test_notification import _make_config
+
+    with mock.patch("src.notification.get_config",
+                    return_value=_make_config(report_renderer_enabled=False, report_language="ko")):
+        service = NotificationService()
+        result = AnalysisResult(
+            code="SOXL",
+            name="Direxion Daily Semiconductor Bull 3X Shares",
+            sentiment_score=35,
+            trend_prediction="强烈看空",
+            operation_advice="减仓",
+            analysis_summary="반도체 약세",
+            report_language="ko",
+            market_snapshot={"price": 46.89, "source": "fallback", "pct_chg": -3.2},
+        )
+        out = service.generate_dashboard_report([result], report_date="2026-11-20")
+    assert "SOXL" in out
+    assert "대체 소스" in out
+    assert "降级兜底" not in out
