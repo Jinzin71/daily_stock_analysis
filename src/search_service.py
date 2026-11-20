@@ -2241,6 +2241,129 @@ class SearXNGSearchProvider(BaseSearchProvider):
         )
 
 
+class GoogleNewsRssSearchProvider(BaseSearchProvider):
+    """
+    Google News RSS 无 Key 新闻兜底（keyless news fallback）。
+
+    - 不需要 API Key，GitHub Actions runner 可直接访问
+    - 仅返回标题 / 来源 / 发布时间，摘要较短；配置 Tavily 等付费/免费 Key 后
+      会排在本兜底之前优先使用
+    - 默认使用 en-US 版本；查询包含韩文时切换为 ko-KR
+    """
+
+    BASE_URL = "https://news.google.com/rss/search"
+    TIMEOUT_SECONDS = 10
+    _HANGUL_RE = re.compile(r"[가-힣]")
+    _TAG_RE = re.compile(r"<[^>]+>")
+
+    def __init__(self, enabled: bool = True):
+        super().__init__([], "GoogleNewsRSS")
+        self._enabled = bool(enabled)
+
+    @property
+    def is_available(self) -> bool:
+        return self._enabled
+
+    def _locale_params(self, query: str) -> Dict[str, str]:
+        if self._HANGUL_RE.search(query or ""):
+            return {"hl": "ko", "gl": "KR", "ceid": "KR:ko"}
+        return {"hl": "en-US", "gl": "US", "ceid": "US:en"}
+
+    @classmethod
+    def _clean_html(cls, value: str) -> str:
+        import html as _html
+
+        text = cls._TAG_RE.sub(" ", value or "")
+        return re.sub(r"\s+", " ", _html.unescape(text)).strip()
+
+    @classmethod
+    def parse_feed(cls, xml_text: str, max_results: int) -> List[SearchResult]:
+        """Parse a Google News RSS payload into SearchResult items."""
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml_text)
+        results: List[SearchResult] = []
+        for item in root.iter("item"):
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            if not title or not link:
+                continue
+            source_el = item.find("source")
+            source = (source_el.text or "").strip() if source_el is not None and source_el.text else ""
+            # Google News titles end with " - <source>"; strip it for a cleaner headline.
+            if source and title.endswith(f" - {source}"):
+                title = title[: -len(f" - {source}")].strip()
+            snippet = cls._clean_html(item.findtext("description") or "")
+            if not snippet or snippet == title or snippet.startswith(title):
+                snippet = title
+            results.append(
+                SearchResult(
+                    title=title,
+                    snippet=snippet[:500],
+                    url=link,
+                    source=source or "Google News",
+                    published_date=(item.findtext("pubDate") or "").strip() or None,
+                )
+            )
+            if len(results) >= max_results:
+                break
+        return results
+
+    def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7, **_: Any) -> SearchResponse:
+        params = {"q": f"{query} when:{max(1, int(days))}d"}
+        params.update(self._locale_params(query))
+        response = requests.get(
+            self.BASE_URL,
+            params=params,
+            timeout=self.TIMEOUT_SECONDS,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; daily-stock-analysis/1.0)"},
+        )
+        if response.status_code != 200:
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message=f"HTTP {response.status_code}",
+            )
+        results = self.parse_feed(response.text, max_results)
+        return SearchResponse(query=query, results=results, provider=self.name, success=True)
+
+    def search(self, query: str, max_results: int = 5, days: int = 7, **search_kwargs: Any) -> SearchResponse:
+        if not self._enabled:
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message="GoogleNewsRSS 未启用",
+            )
+        start_time = time.time()
+        try:
+            response = self._do_search(query, "", max_results, days=days)
+        except Exception as exc:
+            logger.warning("[%s] 搜索 '%s' 失败: %s", self.name, query, exc)
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message=str(exc),
+                search_time=time.time() - start_time,
+            )
+        response.search_time = time.time() - start_time
+        if response.success:
+            response.mark_retrieved()
+            logger.info(
+                "[%s] 搜索 '%s' 成功，返回 %s 条结果，耗时 %.2fs",
+                self.name,
+                query,
+                len(response.results),
+                response.search_time,
+            )
+        return response
+
+
 class SearchService:
     """
     搜索服务
@@ -2414,6 +2537,7 @@ class SearchService:
         searxng_timeout_seconds: Optional[int] = None,
         news_max_age_days: int = 3,
         news_strategy_profile: str = "short",
+        google_news_rss_enabled: bool = False,
     ):
         """
         初始化搜索服务
@@ -2427,6 +2551,7 @@ class SearchService:
             minimax_keys: MiniMax API Key 列表
             searxng_base_urls: SearXNG 实例地址列表（自建无配额兜底）
             searxng_public_instances_enabled: 未配置自建实例时，是否自动使用公共 SearXNG 实例
+            google_news_rss_enabled: 启用 Google News RSS 无 Key 兜底（排在所有 Key 型引擎之后）
             news_max_age_days: 新闻最大时效（天）
             news_strategy_profile: 新闻窗口策略档位（ultra_short/short/medium/long）
         """
@@ -2442,6 +2567,7 @@ class SearchService:
             "searxng_timeout_seconds": searxng_timeout_seconds,
             "news_max_age_days": int(news_max_age_days),
             "news_strategy_profile": news_strategy_profile,
+            "google_news_rss_enabled": bool(google_news_rss_enabled),
         }
         self._providers: List[BaseSearchProvider] = []
         self.news_max_age_days = max(1, news_max_age_days)
@@ -2504,6 +2630,11 @@ class SearchService:
                 logger.info("已配置 SearXNG 搜索，共 %s 个自建实例", len(searxng_base_urls))
             else:
                 logger.info("已启用 SearXNG 公共实例自动发现模式")
+
+        # 8. Google News RSS（无 Key 兜底，最后使用）
+        if google_news_rss_enabled:
+            self._providers.append(GoogleNewsRssSearchProvider(enabled=True))
+            logger.info("已启用 Google News RSS 无 Key 新闻兜底")
 
         if not self._providers:
             logger.warning("未配置任何搜索能力，新闻搜索功能将不可用")
@@ -4927,6 +5058,7 @@ def get_search_service() -> SearchService:
                     searxng_timeout_seconds=getattr(config, "searxng_timeout_seconds", None),
                     news_max_age_days=config.news_max_age_days,
                     news_strategy_profile=getattr(config, "news_strategy_profile", "short"),
+                    google_news_rss_enabled=getattr(config, "google_news_rss_enabled", False),
                 )
     
     return _search_service

@@ -1,9 +1,10 @@
 name: 每日股票分析
 
 on:
-  # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
+  # 定时触发 - 美股收盘后执行：UTC 22:30 = 韩国时间 次日 07:30（周二~周六 KST）
+  # 美股常规收盘 UTC 21:00（冬令时）/ 20:00（夏令时），收盘后跑才能拿到完整日线
   schedule:
-    - cron: '0 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
+    - cron: '30 22 * * 1-5'     # 周一到周五 UTC 22:30（美东收盘后）
   
   # 手动触发
   workflow_dispatch:
@@ -59,6 +60,36 @@ jobs:
       - name: 创建必要目录
         run: |
           mkdir -p data logs reports
+
+      - name: Telegram 연결 진단 (getMe)
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os, re, requests
+          from src.config import normalize_telegram_bot_token
+          raw = os.environ.get("TELEGRAM_BOT_TOKEN") or ""
+          token = normalize_telegram_bot_token(raw) or ""
+          chat_id = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip().strip('"').strip("'")
+          if not token:
+              print("⚪ TELEGRAM_BOT_TOKEN 미설정"); raise SystemExit(0)
+          looks_ok = bool(re.fullmatch(r"\d+:[A-Za-z0-9_-]{20,}", token))
+          print(f"토큰 형태: 길이={len(token)}, 정상형식={looks_ok}, 원본에서 정리됨={raw != token}")
+          r = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10)
+          if r.status_code == 404:
+              print("::error::Telegram 404 — TELEGRAM_BOT_TOKEN 이 유효하지 않습니다. @BotFather 에서 /token 으로 다시 발급받아 Secret 을 교체하세요.")
+              raise SystemExit(0)
+          info = r.json()
+          print("getMe:", "✅ OK @" + info["result"]["username"] if info.get("ok") else info)
+          if chat_id:
+              c = requests.get(f"https://api.telegram.org/bot{token}/getChat", params={"chat_id": chat_id}, timeout=10).json()
+              if c.get("ok"):
+                  print("getChat: ✅ OK", c["result"].get("type"))
+              else:
+                  print(f"::error::TELEGRAM_CHAT_ID 확인 실패: {c.get('description')} — 봇에게 먼저 /start 를 보냈는지, chat id 가 맞는지 확인하세요.")
+          PY
       
       - name: 执行股票分析
         env:
@@ -334,6 +365,8 @@ jobs:
           SEARXNG_BASE_URLS: ${{ vars.SEARXNG_BASE_URLS || secrets.SEARXNG_BASE_URLS }}
           SEARXNG_PUBLIC_INSTANCES_ENABLED: ${{ vars.SEARXNG_PUBLIC_INSTANCES_ENABLED || secrets.SEARXNG_PUBLIC_INSTANCES_ENABLED }}
           SEARXNG_TIMEOUT_SECONDS: ${{ vars.SEARXNG_TIMEOUT_SECONDS || secrets.SEARXNG_TIMEOUT_SECONDS }}
+          # Google News RSS 无 Key 新闻兜底（默认开启；配置 Tavily 等 Key 后其优先）
+          GOOGLE_NEWS_RSS_ENABLED: ${{ vars.GOOGLE_NEWS_RSS_ENABLED || 'true' }}
           MX_APIKEY: ${{ secrets.MX_APIKEY }}
           MX_PRIORITY: ${{ vars.MX_PRIORITY || secrets.MX_PRIORITY }}
           
@@ -427,14 +460,14 @@ jobs:
           # ==========================================
           # 避免直接写入 STOCK_LIST，保留同名 Environment variables 的 runner 环境值。
           STOCK_LIST_CONFIG: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'cn' }}
+          MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'us' }}
           MARKET_REVIEW_COLOR_SCHEME: ${{ vars.MARKET_REVIEW_COLOR_SCHEME || secrets.MARKET_REVIEW_COLOR_SCHEME || 'green_up' }}
           
           # ==========================================
           # 运行配置 ⬅️ 新增！
           # ==========================================
           REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
-          REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || secrets.REPORT_LANGUAGE || '' }}
+          REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || secrets.REPORT_LANGUAGE || 'ko' }}
           REPORT_SHOW_LLM_MODEL: ${{ vars.REPORT_SHOW_LLM_MODEL || secrets.REPORT_SHOW_LLM_MODEL || 'true' }}
           SINGLE_STOCK_NOTIFY: ${{ vars.SINGLE_STOCK_NOTIFY || secrets.SINGLE_STOCK_NOTIFY || 'false' }}
           MARKET_REVIEW_ENABLED: ${{ vars.MARKET_REVIEW_ENABLED || secrets.MARKET_REVIEW_ENABLED || 'true' }}
@@ -461,7 +494,7 @@ jobs:
           if [ -n "${STOCK_LIST_CONFIG:-}" ]; then
             export STOCK_LIST="$STOCK_LIST_CONFIG"
           elif [ -z "${STOCK_LIST:-}" ]; then
-            export STOCK_LIST="600519"
+            export STOCK_LIST="SOXL"
           fi
 
           # 处理 LITELLM YAML 配置文件
@@ -478,9 +511,9 @@ jobs:
           MODE="${{ github.event.inputs.mode || 'full' }}"
           
           echo "=========================================="
-          echo "🚀 A股自选股智能分析系统"
+          echo "🚀 미국 주식 AI 분석 (SOXL)"
           echo "=========================================="
-          echo "⏰ 时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
+          echo "⏰ 时间: $(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M:%S') KST"
           echo "🎯 运行模式: $MODE"
           echo "📊 自选股: $STOCK_LIST"
           echo "📝 报告类型: $REPORT_TYPE"
@@ -522,6 +555,7 @@ jobs:
           echo "  MiniMax API Keys: $([ -n "$MINIMAX_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  Brave API Keys: $([ -n "$BRAVE_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  SearXNG Base URLs: $([ -n "$SEARXNG_BASE_URLS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
+          echo "  Google News RSS: $([ "${GOOGLE_NEWS_RSS_ENABLED,,}" = "true" ] && echo '✅ 已启用（无 Key 兜底）' || echo '⚪ 未启用')"
           case "${SEARXNG_PUBLIC_INSTANCES_ENABLED,,}" in
             0|false|no|off)
               echo "  SearXNG Public Instances: ❌ 已禁用"
