@@ -32,7 +32,7 @@ from tenacity import (
 )
 
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, _is_hk_market, is_bse_code
-from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
+from .realtime_types import ChipDistribution, UnifiedRealtimeQuote, RealtimeSource
 from .us_index_mapping import get_us_index_yf_symbol, is_us_stock_code
 from .yfinance_fundamental_adapter import _safe_float
 from src.services.market_symbol_utils import get_suffix_market, is_suffix_market_symbol
@@ -763,7 +763,7 @@ class YfinanceFetcher(BaseFetcher):
             quote = UnifiedRealtimeQuote(
                 code=user_code,
                 name=index_name or user_code,
-                source=RealtimeSource.FALLBACK,
+                source=RealtimeSource.YFINANCE,
                 market="us",
                 currency=str(ticker_info.get("currency") or "").upper() or None,
                 data_quality="partial" if missing_fields else "ok",
@@ -790,6 +790,71 @@ class YfinanceFetcher(BaseFetcher):
         except Exception as e:
             logger.warning(f"[Yfinance] 获取美股指数 {user_code} 实时行情失败: {e}")
             return None
+
+    @staticmethod
+    def _safe_attr(obj: Any, *names: str) -> Optional[float]:
+        """Read a numeric attribute from yfinance fast_info without raising."""
+        for name in names:
+            try:
+                value = _safe_float(getattr(obj, name, None))
+            except Exception:
+                value = None
+            if value:
+                return value
+        return None
+
+    def get_chip_distribution(self, stock_code: str) -> Optional[ChipDistribution]:
+        """
+        美股估算筹码分布（매물대）。
+
+        Yahoo 没有筹码接口，用近 1 年日线按 CYQ 换手衰减算法估算，
+        source 标记为 ``yfinance_estimated``。A 股 / 指数 / 港股返回 None，
+        交给东方财富 / Tushare 等真实筹码数据源处理。
+        """
+        import yfinance as yf
+        from .chip_estimator import compute_cyq_metrics, estimate_chip_distribution
+
+        if not self._is_us_stock(stock_code) or get_us_index_yf_symbol(stock_code)[0]:
+            return None
+        symbol = self._convert_stock_code(stock_code)
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1y", auto_adjust=False)
+        if hist is None or hist.empty:
+            return None
+        bars = hist.rename(columns=str.lower)
+        shares = None
+        try:
+            shares = self._safe_attr(ticker.fast_info, 'shares')
+        except Exception:
+            shares = None
+        distribution = estimate_chip_distribution(bars, shares)
+        if distribution is None:
+            return None
+        current_price = float(bars['close'].iloc[-1])
+        metrics = compute_cyq_metrics(distribution, current_price)
+        last_index = bars.index[-1]
+        chip_date = last_index.strftime('%Y-%m-%d') if hasattr(last_index, 'strftime') else str(last_index)[:10]
+        chip = ChipDistribution(
+            code=symbol,
+            date=chip_date,
+            source="yfinance_estimated",
+            profit_ratio=metrics['获利比例'],
+            avg_cost=metrics['平均成本'],
+            cost_90_low=metrics['90成本-低'],
+            cost_90_high=metrics['90成本-高'],
+            concentration_90=metrics['90集中度'],
+            cost_70_low=metrics['70成本-低'],
+            cost_70_high=metrics['70成本-高'],
+            concentration_70=metrics['70集中度'],
+        )
+        logger.info(
+            "[筹码分布] %s 估算完成（Yahoo 日线 CYQ）：获利比例=%.1f%%，平均成本=%.4f，90%%集中度=%.2f%%",
+            symbol,
+            chip.profit_ratio * 100,
+            chip.avg_cost,
+            chip.concentration_90 * 100,
+        )
+        return chip
 
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         """
@@ -846,6 +911,8 @@ class YfinanceFetcher(BaseFetcher):
                 low = getattr(info, 'dayLow', None) or getattr(info, 'day_low', None)
                 volume = getattr(info, 'lastVolume', None) or getattr(info, 'last_volume', None)
                 market_cap = getattr(info, 'marketCap', None) or getattr(info, 'market_cap', None)
+                avg_volume_10d = self._safe_attr(info, 'tenDayAverageVolume', 'ten_day_average_volume')
+                shares_outstanding = self._safe_attr(info, 'shares')
 
             except Exception:
                 # 回退到 history 方法获取最新数据
@@ -868,6 +935,8 @@ class YfinanceFetcher(BaseFetcher):
                 low = float(today['Low'])
                 volume = int(today['Volume'])
                 market_cap = None
+                avg_volume_10d = None
+                shares_outstanding = None
 
             # 计算涨跌幅
             change_amount = None
@@ -903,13 +972,31 @@ class YfinanceFetcher(BaseFetcher):
             pe_ratio = _safe_float(ticker_info.get('trailingPE'))
             pb_ratio = _safe_float(ticker_info.get('priceToBook'))
 
+            # 量比：当日成交量 / 近 10 日日均成交量（Yahoo 无分时口径，用日均近似）
+            if not avg_volume_10d:
+                avg_volume_10d = _safe_float(ticker_info.get('averageDailyVolume10Day')) or _safe_float(
+                    ticker_info.get('averageVolume10days')
+                )
+            volume_ratio = None
+            if volume and avg_volume_10d and avg_volume_10d > 0:
+                volume_ratio = round(float(volume) / float(avg_volume_10d), 2)
+            # 换手率：当日成交量 / 流通股本（ETF 等拿不到股本时为空）
+            if not shares_outstanding:
+                shares_outstanding = _safe_float(ticker_info.get('floatShares')) or _safe_float(
+                    ticker_info.get('sharesOutstanding')
+                )
+            turnover_rate = None
+            if volume and shares_outstanding and shares_outstanding > 0:
+                turnover_rate = round(float(volume) / float(shares_outstanding) * 100, 2)
+            # 成交额：Yahoo 不提供，用 收盘价 × 成交量 近似
+            amount = round(float(price) * float(volume), 2) if price and volume else None
+
             missing_fields = [
                 field
                 for field, value in {
                     "price": price,
                     "prev_close": prev_close,
                     "volume": volume,
-                    "amount": None,
                     "pe_ratio": pe_ratio,
                     "pb_ratio": pb_ratio,
                 }.items()
@@ -918,7 +1005,7 @@ class YfinanceFetcher(BaseFetcher):
             quote = UnifiedRealtimeQuote(
                 code=symbol,
                 name=name,
-                source=RealtimeSource.FALLBACK,
+                source=RealtimeSource.YFINANCE,
                 market=suffix_market or ("hk" if _is_hk_market(stock_code) else "us" if is_us_symbol else None),
                 currency=str(ticker_info.get("currency") or "").upper() or None,
                 data_quality="partial" if missing_fields else "ok",
@@ -927,9 +1014,9 @@ class YfinanceFetcher(BaseFetcher):
                 change_pct=round(change_pct, 2) if change_pct is not None else None,
                 change_amount=round(change_amount, 4) if change_amount is not None else None,
                 volume=volume,
-                amount=None,  # yfinance 不直接提供成交额
-                volume_ratio=None,
-                turnover_rate=None,
+                amount=amount,
+                volume_ratio=volume_ratio,
+                turnover_rate=turnover_rate,
                 amplitude=round(amplitude, 2) if amplitude is not None else None,
                 open_price=open_price,
                 high=high,

@@ -1227,67 +1227,12 @@ class TushareFetcher(BaseFetcher):
 
     def compute_cyq_metrics(self, df: pd.DataFrame, current_price: float) -> dict:
         """
-        基于 Tushare 的筹码分布明细表 (cyq_chips) 计算常用筹码指标  
-        :param df: 包含 'price' 和 'percent' 列的 DataFrame  
-        :param current_price: 股票当天的当前价/收盘价 (用于计算获利比例)  
-        :return: 包含各项筹码指标的字典  
+        基于 Tushare 的筹码分布明细表 (cyq_chips) 计算常用筹码指标。
+        实现已抽到 data_provider.chip_estimator，供美股估算筹码复用。
         """
-        import numpy as np
-        # 1. 确保按价格从小到大排序 (Tushare 返回的数据往往是纯倒序的)
-        df_sorted = df.sort_values(by='price', ascending=True).reset_index(drop=True)
+        from .chip_estimator import compute_cyq_metrics
 
-        # 2. 防止原始数据 percent 总和产生浮点数误差，归一化到 100%
-        total_percent = df_sorted['percent'].sum()
-
-        df_sorted['norm_percent'] = df_sorted['percent'] / total_percent * 100
-
-        # 3. 计算筹码的累积分布
-        df_sorted['cumsum'] = df_sorted['norm_percent'].cumsum()
-
-        # --- 获利比例 ---
-        # 所有价格 <= 当前价的筹码之和
-        winner_rate = df_sorted[df_sorted['price'] <= current_price]['norm_percent'].sum()
-
-        # --- 平均成本 ---
-        # 价格的加权平均值
-        avg_cost = np.average(df_sorted['price'], weights=df_sorted['norm_percent'])
-
-        # --- 辅助函数：求指定累积比例处的价格 ---
-        def get_percentile_price(target_pct):
-            # 寻找累积求和第一次大于等于目标百分比的行索引
-            idx = df_sorted['cumsum'].searchsorted(target_pct)
-            idx = min(idx, len(df_sorted) - 1) # 防止越界
-            return df_sorted.loc[idx, 'price']
-
-        # --- 90% 成本区与集中度 ---
-        # 去头去尾各 5%
-        cost_90_low = get_percentile_price(5)
-        cost_90_high = get_percentile_price(95)
-        if (cost_90_high + cost_90_low) != 0:
-            concentration_90 = (cost_90_high - cost_90_low) / (cost_90_high + cost_90_low) * 100
-        else:
-            concentration_90 = 0.0
-            
-        # --- 70% 成本区与集中度 ---
-        # 去头去尾各 15%
-        cost_70_low = get_percentile_price(15)
-        cost_70_high = get_percentile_price(85)
-        if (cost_70_high + cost_70_low) != 0:
-            concentration_70 = (cost_70_high - cost_70_low) / (cost_70_high + cost_70_low) * 100
-        else:
-            concentration_70 = 0.0
-
-        # 返回格式化结果
-        return {
-            "获利比例": round(winner_rate/100, 4), # /100 与akshare保持一致，返回小数格式
-            "平均成本": round(avg_cost, 4),
-            "90成本-低": round(cost_90_low, 4),
-            "90成本-高": round(cost_90_high, 4),
-            "90集中度": round(concentration_90/100, 4),
-            "70成本-低": round(cost_70_low, 4),
-            "70成本-高": round(cost_70_high, 4),
-            "70集中度": round(concentration_70/100, 4)
-        }
+        return compute_cyq_metrics(df, current_price)
 
 
 

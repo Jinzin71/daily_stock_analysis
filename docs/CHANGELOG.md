@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 美股筹码分布：YFinance 用近 1 年日线按 CYQ 换手衰减算法估算（source=`yfinance_estimated`），`compute_cyq_metrics` 抽到 `data_provider/chip_estimator.py` 与 Tushare 共用。
+- [修复] YFinance 实时行情来源标记为 `yfinance`（原误标 `fallback` 导致 quote 被判定为降级），并补齐量比、换手率、近似成交额。
+- [修复] 收盘后/开盘前日线已包含最新交易日时，不再用实时行情覆盖 today 并标记 `technical: partial`；本地历史不足 60 根时首次拉取 120 个交易日，保证 MA60/MACD 有足够数据。
+
 - [新功能] 新增 `GOOGLE_NEWS_RSS_ENABLED` 无 Key 的 Google News RSS 新闻兜底搜索，排在所有 Key 型搜索引擎之后。
 - [修复] `TELEGRAM_BOT_TOKEN` 自动去除空白/引号/`bot` 前缀/完整 URL，并在 HTTP 404 时给出 Token 无效的明确提示；每日工作流新增 getMe 预检。
 - [改进] 美股大盘新闻检索改用英文查询，并为 SOXL/SOXX 增加名称映射。

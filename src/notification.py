@@ -2129,6 +2129,7 @@ class NotificationService(
         "sina": {"zh": "新浪财经", "en": "Sina Finance"},
         "stooq": {"zh": "Stooq", "en": "Stooq"},
         "longbridge": {"zh": "长桥", "en": "Longbridge"},
+        "yfinance": {"zh": "Yahoo Finance", "en": "Yahoo Finance"},
         "fallback": {"zh": "降级兜底", "en": "Fallback", "ko": "대체 소스"},
     }
 
