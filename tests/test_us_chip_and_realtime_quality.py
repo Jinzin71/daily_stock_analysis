@@ -130,3 +130,23 @@ def test_chip_and_turnover_display_helpers():
     assert NotificationService._format_turnover_display(None) == "N/A"
     assert NotificationService._format_turnover_display("N/A") == "N/A"
     assert NotificationService._format_turnover_display(3.2) == "3.2%"
+
+
+def test_bare_number_chip_ratios_are_replaced_with_computed_values():
+    from data_provider.realtime_types import ChipDistribution
+    from src.analyzer import AnalysisResult, fill_chip_structure_if_needed
+
+    result = AnalysisResult(
+        code="SOXL", name="SOXL", sentiment_score=20, trend_prediction="看空",
+        operation_advice="观望", report_language="ko",
+        dashboard={"data_perspective": {"chip_structure": {
+            "profit_ratio": "0.2", "avg_cost": 85.34, "concentration": 0.6438, "chip_health": "위험"}}},
+    )
+    chip = ChipDistribution(code="SOXL", source="yfinance_estimated", profit_ratio=0.002,
+                            avg_cost=85.34, concentration_90=0.6438, concentration_70=0.4)
+    fill_chip_structure_if_needed(result, chip)
+    cs = result.dashboard["data_perspective"]["chip_structure"]
+    assert cs["profit_ratio"] == "0.2%"
+    assert cs["concentration"] == "64.38%"
+    assert cs["avg_cost"] == 85.34
+    assert cs["chip_health"] == "위험"
