@@ -1461,7 +1461,7 @@ class NotificationService(
                     if vol_data:
                         report_lines.extend([
                             f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {vol_data.get('volume_ratio', 'N/A')} ({vol_data.get('volume_status', '')}) | "
-                            f"{labels['turnover_rate_label']} {vol_data.get('turnover_rate', 'N/A')}%",
+                            f"{labels['turnover_rate_label']} {self._format_turnover_display(vol_data.get('turnover_rate'))}",
                             f"💡 *{vol_data.get('volume_meaning', '')}*",
                             "",
                         ])
@@ -1475,8 +1475,11 @@ class NotificationService(
                         else:
                             chip_health = localize_chip_health(chip_data.get('chip_health', 'N/A'), report_language)
                             report_lines.extend([
-                                f"**{labels['chip_label']}**: {chip_data.get('profit_ratio', 'N/A')} | {chip_data.get('avg_cost', 'N/A')} | "
-                                f"{chip_data.get('concentration', 'N/A')} {chip_health}",
+                                f"**{labels['chip_label']}**: "
+                                f"{labels.get('chip_profit_ratio_label', '')} {self._format_ratio_display(chip_data.get('profit_ratio'))} | "
+                                f"{labels.get('chip_avg_cost_label', '')} {chip_data.get('avg_cost', 'N/A')} | "
+                                f"{labels.get('chip_concentration_label', '')} {self._format_ratio_display(chip_data.get('concentration'))} "
+                                f"{chip_health}",
                                 "",
                             ])
                     else:
@@ -2132,6 +2135,28 @@ class NotificationService(
         "yfinance": {"zh": "Yahoo Finance", "en": "Yahoo Finance"},
         "fallback": {"zh": "降级兜底", "en": "Fallback", "ko": "대체 소스"},
     }
+
+    @staticmethod
+    def _format_ratio_display(value: Any) -> str:
+        """Render a 0-1 ratio (or an already-percent value) as a percentage string."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return "N/A"
+        text = str(value).strip()
+        if text.endswith("%"):
+            return text
+        try:
+            number = float(text)
+        except (TypeError, ValueError):
+            return text
+        return f"{number * 100:.1f}%" if abs(number) <= 1 else f"{number:.1f}%"
+
+    @staticmethod
+    def _format_turnover_display(value: Any) -> str:
+        """Render turnover rate (already in percent); unknown values stay N/A without a % sign."""
+        if value is None or (isinstance(value, str) and value.strip() in {"", "N/A", "None"}):
+            return "N/A"
+        text = str(value).strip()
+        return text if text.endswith("%") else f"{text}%"
 
     def _get_source_display_name(self, source: Any, language: Optional[str]) -> str:
         raw_source = str(source or "N/A")

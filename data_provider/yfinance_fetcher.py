@@ -985,6 +985,12 @@ class YfinanceFetcher(BaseFetcher):
                 shares_outstanding = _safe_float(ticker_info.get('floatShares')) or _safe_float(
                     ticker_info.get('sharesOutstanding')
                 )
+            if not shares_outstanding:
+                # ETF：Yahoo 通常不给股本，用 总资产 / 净值 估算流通份额
+                total_assets = _safe_float(ticker_info.get('totalAssets'))
+                nav_price = _safe_float(ticker_info.get('navPrice'))
+                if total_assets and nav_price and nav_price > 0:
+                    shares_outstanding = total_assets / nav_price
             turnover_rate = None
             if volume and shares_outstanding and shares_outstanding > 0:
                 turnover_rate = round(float(volume) / float(shares_outstanding) * 100, 2)

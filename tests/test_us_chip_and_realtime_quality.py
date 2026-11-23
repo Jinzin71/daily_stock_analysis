@@ -104,3 +104,29 @@ def test_daily_fetch_days_backfills_when_history_short():
     assert pipeline._daily_fetch_days("SOXL", date(2026, 11, 20)) == 30
     pipeline.db.get_data_range.side_effect = RuntimeError("db down")
     assert pipeline._daily_fetch_days("SOXL", date(2026, 11, 20)) == 120
+
+
+@patch("yfinance.Ticker")
+def test_yfinance_etf_turnover_uses_total_assets_over_nav(ticker_factory: MagicMock):
+    ticker = MagicMock()
+    ticker.fast_info = SimpleNamespace(
+        lastPrice=30.0, previousClose=29.0, open=29.5, dayHigh=30.5, dayLow=29.0,
+        lastVolume=100_000_000, marketCap=None, tenDayAverageVolume=50_000_000, shares=None,
+    )
+    ticker.info = {"shortName": "SOXL", "currency": "USD", "totalAssets": 12_000_000_000, "navPrice": 30.0}
+    ticker_factory.return_value = ticker
+    quote = YfinanceFetcher().get_realtime_quote("SOXL")
+    assert quote.turnover_rate == 25.0
+
+
+def test_chip_and_turnover_display_helpers():
+    from src.notification import NotificationService
+
+    assert NotificationService._format_ratio_display(0.002) == "0.2%"
+    assert NotificationService._format_ratio_display("0.6438") == "64.4%"
+    assert NotificationService._format_ratio_display("64.38") == "64.4%"
+    assert NotificationService._format_ratio_display("12%") == "12%"
+    assert NotificationService._format_ratio_display(None) == "N/A"
+    assert NotificationService._format_turnover_display(None) == "N/A"
+    assert NotificationService._format_turnover_display("N/A") == "N/A"
+    assert NotificationService._format_turnover_display(3.2) == "3.2%"
