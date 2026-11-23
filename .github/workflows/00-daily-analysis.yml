@@ -83,12 +83,12 @@ jobs:
               raise SystemExit(0)
           info = r.json()
           print("getMe:", "✅ OK @" + info["result"]["username"] if info.get("ok") else info)
-          if chat_id:
-              c = requests.get(f"https://api.telegram.org/bot{token}/getChat", params={"chat_id": chat_id}, timeout=10).json()
+          for idx, single in enumerate([p for p in re.split(r"[,;\s]+", chat_id) if p], start=1):
+              c = requests.get(f"https://api.telegram.org/bot{token}/getChat", params={"chat_id": single}, timeout=10).json()
               if c.get("ok"):
-                  print("getChat: ✅ OK", c["result"].get("type"))
+                  print(f"getChat #{idx}: ✅ OK", c["result"].get("type"))
               else:
-                  print(f"::error::TELEGRAM_CHAT_ID 확인 실패: {c.get('description')} — 봇에게 먼저 /start 를 보냈는지, chat id 가 맞는지 확인하세요.")
+                  print(f"::error::TELEGRAM_CHAT_ID #{idx} 확인 실패: {c.get('description')} — 해당 계정이 봇에게 먼저 /start 를 보냈는지, chat id 가 맞는지 확인하세요.")
           PY
       
       - name: 执行股票分析
