@@ -972,6 +972,14 @@ def normalize_chip_structure_availability(result: "AnalysisResult", chip_data: A
     _mark_chip_structure_unavailable(result, language)
 
 
+# LLM 有时把比例写成裸数字（"0.2" 可能是 0.2% 也可能是 20%），无法消歧时以数据源计算值为准。
+_CHIP_PERCENT_KEYS = ("profit_ratio", "concentration")
+
+
+def _is_explicit_percent(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().endswith("%")
+
+
 def fill_chip_structure_if_needed(result: "AnalysisResult", chip_data: Any) -> None:
     """When chip_data exists, fill chip_structure placeholder fields from chip_data (in-place)."""
     if not result or not _has_meaningful_chip_data(chip_data):
@@ -991,7 +999,9 @@ def fill_chip_structure_if_needed(result: "AnalysisResult", chip_data: Any) -> N
         # Start from a copy of cs to preserve any extra keys the LLM may have added
         merged = dict(cs)
         for k in _CHIP_KEYS:
-            if _is_value_placeholder(merged.get(k)):
+            if _is_value_placeholder(merged.get(k)) or (
+                k in _CHIP_PERCENT_KEYS and not _is_explicit_percent(merged.get(k))
+            ):
                 merged[k] = filled[k]
         if merged != cs:
             dp["chip_structure"] = merged

@@ -414,9 +414,10 @@ class StockAnalysisPipeline:
                 )
                 return True, None
 
-            # 从数据源获取数据
-            logger.info(f"{stock_name}({code}) 开始从数据源获取数据...")
-            df, source_name = self.fetcher_manager.get_daily_data(code, days=30)
+            # 从数据源获取数据；本地历史不足 MA60/MACD 所需时一次补足
+            fetch_days = self._daily_fetch_days(code, target_date)
+            logger.info(f"{stock_name}({code}) 开始从数据源获取数据（{fetch_days} 个交易日）...")
+            df, source_name = self.fetcher_manager.get_daily_data(code, days=fetch_days)
 
             if df is None or df.empty:
                 return False, "获取数据为空"
@@ -432,6 +433,22 @@ class StockAnalysisPipeline:
             logger.error(f"{stock_name}({code}) {error_msg}")
             return False, error_msg
     
+    # 趋势分析读取近 89 个自然日（约 60 根 K 线）计算 MA60；本地不足时补拉更长历史
+    _MIN_TECHNICAL_BARS = 60
+    _FULL_HISTORY_FETCH_DAYS = 120
+
+    def _daily_fetch_days(self, code: str, target_date: Any) -> int:
+        """Return how many trading days to fetch so MA60/MACD have enough bars."""
+        try:
+            if not isinstance(target_date, date):
+                return self._FULL_HISTORY_FETCH_DAYS
+            bars = self.db.get_data_range(code, target_date - timedelta(days=89), target_date)
+            if bars and len(bars) >= self._MIN_TECHNICAL_BARS:
+                return 30
+        except Exception as exc:
+            logger.debug("[%s] 历史 K 线数量检查失败，按完整历史获取: %s", code, exc)
+        return self._FULL_HISTORY_FETCH_DAYS
+
     def analyze_stock(
         self,
         code: str,
@@ -1100,7 +1117,14 @@ class StockAnalysisPipeline:
 
         # Issue #234：盘中分析使用实时 OHLC 与趋势 MA 覆盖 today。
         # 防护条件：trend_result.ma5 > 0 表示 MA 计算已成功且数据量充足。
-        if realtime_quote and trend_result and trend_result.ma5 > 0:
+        # 收盘后 / 开盘前（非 partial bar）且日线已包含最新交易日时，日线就是定稿数据，
+        # 不再用实时行情覆盖并标记为估算值。
+        if (
+            realtime_quote
+            and trend_result
+            and trend_result.ma5 > 0
+            and not self._daily_bar_is_final(enhanced.get('today'), market_phase_context)
+        ):
             price = getattr(realtime_quote, 'price', None)
             if price is not None and price > 0:
                 yesterday_close = None
@@ -2731,6 +2755,20 @@ class StockAnalysisPipeline:
             return "短期走弱 🔽"
         else:
             return "震荡整理 ↔️"
+
+    @staticmethod
+    def _daily_bar_is_final(
+        today: Any,
+        market_phase_context: Optional[Dict[str, Any]],
+    ) -> bool:
+        """True when the stored daily bar already covers the latest finished session."""
+        if not isinstance(today, dict) or not isinstance(market_phase_context, dict):
+            return False
+        if market_phase_context.get("is_partial_bar") is not False:
+            return False
+        effective = str(market_phase_context.get("effective_daily_bar_date") or "")[:10]
+        bar_date = str(today.get("date") or "")[:10]
+        return bool(effective and bar_date and bar_date >= effective)
 
     def _augment_historical_with_realtime(
         self,
