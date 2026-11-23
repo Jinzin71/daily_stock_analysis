@@ -7,7 +7,7 @@ Telegram 发送提醒服务
 2. 通过 Telegram Bot API 发送 图片消息
 """
 import logging
-from typing import Optional
+from typing import List, Optional
 import requests
 import time
 import re
@@ -33,6 +33,18 @@ class TelegramSender:
             'chat_id': getattr(config, 'telegram_chat_id', None),
             'message_thread_id': getattr(config, 'telegram_message_thread_id', None),
         }
+
+    @staticmethod
+    def _split_chat_ids(value: Optional[str]) -> List[str]:
+        """TELEGRAM_CHAT_ID 支持多个接收方，用逗号/分号/空白分隔，如 "111,222"；去重并保持顺序。"""
+        if value is None:
+            return []
+        ids: List[str] = []
+        for part in re.split(r"[,;\s]+", str(value)):
+            part = part.strip().strip('"').strip("'")
+            if part and part not in ids:
+                ids.append(part)
+        return ids
 
     def _is_telegram_configured(self) -> bool:
         """检查 Telegram 配置是否完整"""
@@ -73,6 +85,25 @@ class TelegramSender:
         if not (self._telegram_config["bot_token"] and target_chat_id):
             logger.warning("Telegram 配置不完整，跳过推送")
             return False
+
+        chat_ids = self._split_chat_ids(target_chat_id)
+        if len(chat_ids) > 1:
+            # 多个接收方：逐个发送，单个失败不影响其他接收方；任一成功即视为成功
+            results = []
+            for single_chat_id in chat_ids:
+                ok = self.send_to_telegram(
+                    content,
+                    chat_id=single_chat_id,
+                    message_thread_id=message_thread_id,
+                    timeout_seconds=timeout_seconds,
+                )
+                if not ok:
+                    logger.error("Telegram 接收方 %s 发送失败", self._mask_chat_id(single_chat_id))
+                results.append(ok)
+            logger.info("Telegram 多接收方发送完成：成功 %d / %d", sum(results), len(results))
+            return any(results)
+        if chat_ids:
+            target_chat_id = chat_ids[0]
 
         bot_token = self._telegram_config['bot_token']
         chat_id = target_chat_id
@@ -354,12 +385,21 @@ class TelegramSender:
 
         return all_success
 
+    @staticmethod
+    def _mask_chat_id(chat_id: str) -> str:
+        text = str(chat_id)
+        return text if len(text) <= 4 else f"***{text[-4:]}"
+
     def _send_telegram_photo(self, image_bytes: bytes) -> bool:
-        """Send image via Telegram sendPhoto API (Issue #289)."""
+        """Send image via Telegram sendPhoto API (Issue #289); supports multiple chat ids."""
         if not self._is_telegram_configured():
             return False
+        chat_ids = self._split_chat_ids(self._telegram_config['chat_id'])
+        results = [self._send_telegram_photo_to(image_bytes, single) for single in chat_ids]
+        return any(results)
+
+    def _send_telegram_photo_to(self, image_bytes: bytes, chat_id: str) -> bool:
         bot_token = self._telegram_config['bot_token']
-        chat_id = self._telegram_config['chat_id']
         message_thread_id = self._telegram_config.get('message_thread_id')
         api_url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
         try:
