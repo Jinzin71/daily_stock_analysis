@@ -1,11 +1,11 @@
 name: 每日股票分析
 
 on:
-  # 定时触发 - 美股收盘后执行：UTC 22:30 = 韩国时间 次日 07:30（周二~周六 KST）
-  # 美股常规收盘 UTC 21:00（冬令时）/ 20:00（夏令时），收盘后跑才能拿到完整日线
-  schedule:
-    - cron: '30 22 * * 1-5'     # 周一到周五 UTC 22:30（美东收盘后）
-  
+  # 定时触发已移除：GitHub schedule 在 fork 仓库上会延迟数小时（实测 5~8 小时）。
+  # 改由 cron-job.org 在 KST 周二~周六 07:30 调用 workflow_dispatch API 触发，
+  # 配置方式见 docs/DEPLOY.md「外部定时触发（cron-job.org）」。
+  # 注意：不要同时恢复 schedule，否则同一天会重复推送。
+
   # 手动触发
   workflow_dispatch:
     inputs:
