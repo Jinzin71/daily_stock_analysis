@@ -497,6 +497,17 @@ schedule:
 | `'0 10 * * *'` | 每天 18:00（北京时间） |
 | `'0 2 * * 1-5'` | 周一到周五 10:00（北京时间） |
 
+### 外部定时触发（cron-job.org）
+
+GitHub Actions 的 `schedule` 在 fork 仓库上可能延迟数小时。需要准点执行时，可移除 `schedule`，改用 cron-job.org 调用 `workflow_dispatch` API（二者不要同时启用，否则会重复推送）：
+
+- URL：`https://api.github.com/repos/<owner>/<repo>/actions/workflows/00-daily-analysis.yml/dispatches`
+- 方法：`POST`；成功返回 HTTP 204
+- Headers：`Accept: application/vnd.github+json`、`Authorization: Bearer <Fine-grained PAT>`、`X-GitHub-Api-Version: 2022-11-28`、`Content-Type: application/json`
+- Body：`{"ref":"main","inputs":{"mode":"stocks-only"}}`
+- PAT 仅授权目标仓库，权限 Actions: Read and write；到期需更新
+- 不传 `force_run`，非交易日仍会按交易日检查跳过
+
 ### 修改自选股
 
 方法一：修改仓库 Secret `STOCK_LIST`

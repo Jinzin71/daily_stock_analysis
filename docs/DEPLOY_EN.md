@@ -453,6 +453,17 @@ Common cron examples:
 | `'0 10 * * *'` | Daily 18:00 (Beijing) |
 | `'0 2 * * 1-5'` | Mon-Fri 10:00 (Beijing) |
 
+### External Scheduling (cron-job.org)
+
+`schedule` on GitHub Actions can be delayed by hours on forks. For on-time runs, remove `schedule` and call the `workflow_dispatch` API from cron-job.org (do not enable both, or reports are sent twice):
+
+- URL: `https://api.github.com/repos/<owner>/<repo>/actions/workflows/00-daily-analysis.yml/dispatches`
+- Method: `POST`; success returns HTTP 204
+- Headers: `Accept: application/vnd.github+json`, `Authorization: Bearer <fine-grained PAT>`, `X-GitHub-Api-Version: 2022-11-28`, `Content-Type: application/json`
+- Body: `{"ref":"main","inputs":{"mode":"stocks-only"}}`
+- Scope the PAT to the target repo only with Actions: Read and write; renew before expiry
+- Omit `force_run` so the trading-day check still skips non-trading days
+
 ### Modify Watchlist
 
 Method 1: Modify repo Secret `STOCK_LIST`
